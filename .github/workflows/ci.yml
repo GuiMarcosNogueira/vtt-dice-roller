@@ -71,7 +71,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: web
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: Run ESLint
         working-directory: web
@@ -137,7 +137,7 @@ jobs:
           node-version: 20
 
       - name: Validate OpenSpec living specs
-        run: npx @openspec/cli validate --specs
+        run: npx openspec validate --specs
 
   ci-status:
     name: CI Pipeline Status
