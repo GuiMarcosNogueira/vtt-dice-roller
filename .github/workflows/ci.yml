@@ -79,6 +79,8 @@ jobs:
 
       - name: Run Unit & Integration Tests with strict coverage (>95%)
         working-directory: web
+        env:
+          VITE_CONFIG_NATIVE_IGNORE_WARNING: "true"
         run: npm run test:coverage
 
       - name: Verify Next.js production build
@@ -137,7 +139,7 @@ jobs:
           node-version: 20
 
       - name: Validate OpenSpec living specs
-        run: npx openspec validate --specs
+        run: npx --yes @fission-ai/openspec validate --specs
 
   ci-status:
     name: CI Pipeline Status
