@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import Home from "../app/page";
 import * as motionDetectorModule from "../app/hooks/useMotionDetector";
 import * as cameraModule from "../app/hooks/useCamera";
@@ -12,7 +12,7 @@ describe("Home Page Integration Tests", () => {
     localStorage.clear();
 
     // Default fetch mock
-    global.fetch = vi.fn().mockImplementation((url: string, options?: RequestInit) => {
+    global.fetch = vi.fn().mockImplementation((url: string) => {
       const urlStr = url.toString();
       if (urlStr.includes("/health")) {
         return Promise.resolve({

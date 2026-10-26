@@ -1,0 +1,157 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-ci:
+    name: Backend (Python FastAPI)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+          cache-dependency-path: api/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r api/requirements.txt ruff
+
+      - name: Lint and format check (ruff)
+        run: |
+          ruff check api/
+          ruff format --check api/
+
+      - name: Run Backend Tests with strict coverage (>95%)
+        working-directory: api
+        env:
+          VISION_API_KEY: mock_ci_key
+          VISION_PROVIDER: openrouter
+        run: |
+          pytest --cov=app --cov-branch --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage artifact
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-report
+          path: api/coverage.xml
+
+  frontend-ci:
+    name: Frontend (Next.js & Vitest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: web
+        run: npm run lint
+
+      - name: Run Unit & Integration Tests with strict coverage (>95%)
+        working-directory: web
+        run: npm run test:coverage
+
+      - name: Verify Next.js production build
+        working-directory: web
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+        run: npm run build
+
+      - name: Upload frontend coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage-report
+          path: web/coverage/
+
+  foundry-module-ci:
+    name: Foundry VTT Module Verification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate module.json and required files
+        run: |
+          node -e '
+            const fs = require("fs");
+            const manifest = JSON.parse(fs.readFileSync("foundry-module/module.json", "utf8"));
+            if (!manifest.id || !manifest.title || !manifest.version) {
+              console.error("Invalid module.json: missing mandatory fields");
+              process.exit(1);
+            }
+            for (const file of [...(manifest.esmodules || []), ...(manifest.styles || [])]) {
+              const fullPath = `foundry-module/${file}`;
+              if (!fs.existsSync(fullPath)) {
+                console.error(`Referenced file not found: ${fullPath}`);
+                process.exit(1);
+              }
+            }
+            console.log(`Foundry Module ${manifest.id} v${manifest.version} validated successfully.`);
+          '
+
+      - name: Check JavaScript syntax
+        run: node --check foundry-module/scripts/main.js
+
+  openspec-ci:
+    name: OpenSpec Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate OpenSpec living specs
+        run: npx @openspec/cli validate --specs
+
+  ci-status:
+    name: CI Pipeline Status
+    runs-on: ubuntu-latest
+    needs: [backend-ci, frontend-ci, foundry-module-ci, openspec-ci]
+    if: always()
+    steps:
+      - name: Check all jobs status
+        run: |
+          if [ "${{ needs.backend-ci.result }}" != "success" ] || \
+             [ "${{ needs.frontend-ci.result }}" != "success" ] || \
+             [ "${{ needs.foundry-module-ci.result }}" != "success" ] || \
+             [ "${{ needs.openspec-ci.result }}" != "success" ]; then
+            echo "CI pipeline failed!"
+            exit 1
+          fi
+          echo "All CI checks passed successfully!"

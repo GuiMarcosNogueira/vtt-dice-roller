@@ -1,13 +1,14 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 from fastapi.testclient import TestClient
-from fastapi import WebSocketDisconnect
-from main import app
-from app.services.websocket_manager import ConnectionManager, ws_manager
-from app.schemas.dice import DieType, RollEvent
+
 from app.routes.rolls import websocket_rolls_endpoint
+from app.services.websocket_manager import ConnectionManager, ws_manager
+from main import app
 
 client = TestClient(app)
+
 
 @pytest.mark.anyio
 async def test_connection_manager_logic_and_failures():
@@ -33,6 +34,7 @@ async def test_connection_manager_logic_and_failures():
     manager.disconnect(mock_ws_dead)
     assert len(manager.active_connections) == 1
 
+
 def test_websocket_and_rolls_flow():
     # Testa conexão WebSocket com o TestClient
     with client.websocket_connect("/ws/rolls") as websocket:
@@ -54,7 +56,7 @@ def test_websocket_and_rolls_flow():
             "die_type": "d20",
             "value": 20,
             "player_name": "Valeros",
-            "source": "optical_camera"
+            "source": "optical_camera",
         }
         post_res = client.post("/api/rolls", json=new_roll)
         assert post_res.status_code == 201
@@ -66,12 +68,14 @@ def test_websocket_and_rolls_flow():
         assert broadcast_msg["data"]["value"] == 20
         assert broadcast_msg["data"]["player_name"] == "Valeros"
 
+
 def test_websocket_disconnect_handler():
     # Testa conexão e desconexão graciosa
     with client.websocket_connect("/ws/rolls") as websocket:
         websocket.receive_json()
         # Fecha a conexão
         websocket.close()
+
 
 @pytest.mark.anyio
 async def test_websocket_generic_exception():
@@ -81,6 +85,7 @@ async def test_websocket_generic_exception():
     mock_ws.receive_text = AsyncMock(side_effect=RuntimeError("Erro inesperado no stream"))
     await websocket_rolls_endpoint(mock_ws)
     assert mock_ws not in ws_manager.active_connections
+
 
 def test_get_rolls_history():
     res = client.get("/api/rolls")

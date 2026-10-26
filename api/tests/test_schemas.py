@@ -1,12 +1,14 @@
 import pytest
 from pydantic import ValidationError
-from app.schemas.dice import DieType, RecognizeRequest, RecognitionResult, RollEvent
+
+from app.schemas.dice import DieType, RecognitionResult, RecognizeRequest, RollEvent
+
 
 def test_recognize_request_validation():
     # Valid with hint
     req = RecognizeRequest(
         image_base64="data:image/jpeg;base64,1234567890abcdefghij",
-        die_type_hint=DieType.D20
+        die_type_hint=DieType.D20,
     )
     assert req.die_type_hint == DieType.D20
 
@@ -21,6 +23,7 @@ def test_recognize_request_validation():
     # Invalid too short image
     with pytest.raises(ValidationError):
         RecognizeRequest(image_base64="abc")
+
 
 def test_recognition_result_validation():
     # Valid d20
@@ -62,7 +65,9 @@ def test_recognition_result_validation():
     # Test validator when die_type is missing from validation context info
     class DummyInfo:
         data = {}
+
     assert RecognitionResult.validate_value_range(15, DummyInfo()) == 15
+
 
 def test_roll_event():
     event = RollEvent(id="roll_1", die_type=DieType.D12, value=11, player_name="Geralt")

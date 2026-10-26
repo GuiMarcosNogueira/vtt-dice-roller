@@ -1,0 +1,46 @@
+name: Release & Distribution
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Package and Publish Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set version variable
+        id: vars
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION=$(node -p 'require("./foundry-module/module.json").version')
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Package Foundry VTT Module
+        run: |
+          cd foundry-module
+          zip -r ../vtt-dice-roller-foundry.zip .
+          cd ..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release v${{ steps.vars.outputs.version }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          files: |
+            vtt-dice-roller-foundry.zip
+            foundry-module/module.json

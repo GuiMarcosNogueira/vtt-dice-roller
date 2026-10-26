@@ -1,7 +1,8 @@
 import json
 import re
-from typing import Optional
+
 from openai import AsyncOpenAI
+
 from app.config import settings
 from app.schemas.dice import DieType, RecognitionResult
 
@@ -32,12 +33,18 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido, sem texto adicional antes ou depo
 }
 """
 
+
 class VisionService:
-    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, model: Optional[str] = None):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
+    ):
         self.api_key = api_key if api_key is not None else settings.vision_api_key
         self.base_url = base_url if base_url is not None else settings.vision_base_url
         self.model = model if model is not None else settings.vision_model
-        
+
         default_headers = {}
         if "openrouter" in (self.base_url or "").lower():
             default_headers["HTTP-Referer"] = "https://github.com/vtt-dice-roller"
@@ -63,25 +70,29 @@ class VisionService:
             content = match.group(1).strip()
         return json.loads(content)
 
-    async def recognize_dice(self, image_base64: str, die_type_hint: Optional[DieType] = None) -> RecognitionResult:
+    async def recognize_dice(
+        self, image_base64: str, die_type_hint: DieType | None = None
+    ) -> RecognitionResult:
         image_url = self.format_image_url(image_base64)
 
         user_content = [
-            {"type": "text", "text": "Identifique o dado e a face superior voltada para cima."}
+            {
+                "type": "text",
+                "text": "Identifique o dado e a face superior voltada para cima.",
+            }
         ]
         if die_type_hint:
-            user_content[0]["text"] += f" Dica: o dado rolado é esperado ser do tipo {die_type_hint.value}."
+            user_content[0]["text"] += (
+                f" Dica: o dado rolado é esperado ser do tipo {die_type_hint.value}."
+            )
 
-        user_content.append({
-            "type": "image_url",
-            "image_url": {"url": image_url}
-        })
+        user_content.append({"type": "image_url", "image_url": {"url": image_url}})
 
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_content}
+                {"role": "user", "content": user_content},
             ],
             response_format={"type": "json_object"},
             temperature=0.1,

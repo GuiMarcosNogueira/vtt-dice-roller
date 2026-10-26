@@ -1,12 +1,14 @@
 import logging
-from typing import List, Dict, Any
+from typing import Any
+
 from fastapi import WebSocket
 
 logger = logging.getLogger("websocket_manager")
 
+
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: list[WebSocket] = []
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -16,9 +18,11 @@ class ConnectionManager:
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
-            logger.info(f"Cliente WebSocket desconectado. Total ativos: {len(self.active_connections)}")
+            logger.info(
+                f"Cliente WebSocket desconectado. Total ativos: {len(self.active_connections)}"
+            )
 
-    async def broadcast(self, message: Dict[str, Any]):
+    async def broadcast(self, message: dict[str, Any]):
         disconnected = []
         for connection in self.active_connections:
             try:
@@ -29,5 +33,6 @@ class ConnectionManager:
 
         for dead_conn in disconnected:
             self.disconnect(dead_conn)
+
 
 ws_manager = ConnectionManager()
