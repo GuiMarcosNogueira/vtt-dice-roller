@@ -1,2 +1,24 @@
+# Environments and dependencies
 api/.venv/
 node_modules/
+.venv/
+
+# Environment variables
+api/.env
+.env
+.env.local
+
+# Python caches and coverage
+api/__pycache__/
+__pycache__/
+*.py[cod]
+api/.pytest_cache/
+.pytest_cache/
+api/.coverage
+.coverage
+htmlcov/
+
+# Next.js build and test coverage
+web/.next/
+web/coverage/
+coverage/
