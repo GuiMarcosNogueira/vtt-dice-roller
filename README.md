@@ -1,5 +1,10 @@
 # VTT Dice Roller 🎲
 
+[![Continuous Integration](https://github.com/GuiMarcosNogueira/vtt-dice-roller/actions/workflows/ci.yml/badge.svg)](https://github.com/GuiMarcosNogueira/vtt-dice-roller/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/Coverage-%3E95%25-brightgreen.svg)](https://github.com/GuiMarcosNogueira/vtt-dice-roller)
+[![Node.js](https://img.shields.io/badge/Node.js-22.x-green.svg)](https://nodejs.org/)
+[![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/)
+
 Aplicação para leitura óptica de dados físicos de RPG (`d4`, `d6`, `d8`, `d10`, `d12`, `d20`, `d100`) via câmera (celular ou computador) utilizando modelos de visão multimodal (OpenRouter, MGC AI Hub, Google AI Studio) com transmissão em tempo real para mesas virtuais (Foundry VTT).
 
 ---
