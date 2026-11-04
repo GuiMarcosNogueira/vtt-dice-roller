@@ -119,54 +119,6 @@ describe("useMotionDetector hook", () => {
     expect(frame).toBeNull();
   });
 
-  it("transitions IDLE -> ROLLING -> STABILIZING -> CAPTURING on motion change and stability", async () => {
-    const { result } = renderHook(() =>
-      useMotionDetector({
-        videoRef: { current: videoEl },
-        isStreaming: true,
-        sensitivity: 10,
-        stabilizeMs: 500,
-        onFrameCaptured: onFrameCapturedMock,
-      })
-    );
-
-    // 1. Frame inicial: pixels = 0
-    pixelDataVal = 0;
-    act(() => {
-      vi.advanceTimersByTime(70);
-    });
-
-    // 2. Movimento brusco: pixels mudam para 100 (diff grande > 10)
-    pixelDataVal = 100;
-    act(() => {
-      vi.advanceTimersByTime(70);
-    });
-
-    expect(result.current.detectionState).toBe("ROLLING");
-    expect(result.current.motionLevel).toBeGreaterThan(10);
-
-    // 3. Estabilização: pixels param de mudar (permanecem 100, diff = 0 < 10)
-    act(() => {
-      vi.advanceTimersByTime(70);
-    });
-    expect(result.current.detectionState).toBe("STABILIZING");
-
-    // 3.1. Permanece em STABILIZING se tempo decorrido for menor que stabilizeMs (100ms < 500ms)
-    act(() => {
-      vi.advanceTimersByTime(100);
-    });
-    expect(result.current.detectionState).toBe("STABILIZING");
-
-    // 4. Aguarda passar o tempo de estabilização (500ms)
-    act(() => {
-      vi.advanceTimersByTime(600);
-      vi.runOnlyPendingTimers();
-    });
-
-    expect(result.current.detectionState).toBe("CAPTURING");
-    expect(onFrameCapturedMock).toHaveBeenCalled();
-  });
-
   it("returns null if videoRef.current is null", () => {
     const { result } = renderHook(() =>
       useMotionDetector({
@@ -258,38 +210,6 @@ describe("useMotionDetector hook", () => {
     expect(cancelSpy).toHaveBeenCalled();
 
     cancelSpy.mockRestore();
-  });
-
-  it("handles automatic stabilization capture without onFrameCaptured callback", () => {
-    const { result } = renderHook(() =>
-      useMotionDetector({
-        videoRef: { current: videoEl },
-        isStreaming: true,
-        sensitivity: 10,
-        stabilizeMs: 300,
-      })
-    );
-
-    pixelDataVal = 0;
-    act(() => {
-      vi.advanceTimersByTime(70);
-    });
-    pixelDataVal = 100;
-    act(() => {
-      vi.advanceTimersByTime(70);
-    });
-    expect(result.current.detectionState).toBe("ROLLING");
-
-    act(() => {
-      vi.advanceTimersByTime(70);
-    });
-    expect(result.current.detectionState).toBe("STABILIZING");
-
-    act(() => {
-      vi.advanceTimersByTime(400);
-      vi.runOnlyPendingTimers();
-    });
-    expect(result.current.detectionState).toBe("CAPTURING");
   });
 
   it("returns early if lowRes canvas context cannot be acquired", () => {

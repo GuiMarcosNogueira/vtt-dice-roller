@@ -2,6 +2,21 @@
 
 import { useState, useRef, useEffect, useCallback, RefObject } from "react";
 import { DetectionState } from "../types";
+import {
+  FRAME_HEIGHT,
+  FRAME_WIDTH,
+  GLOBAL_CHANGED_RATIO,
+  MIN_CHANGED_RATIO,
+  blockMeans,
+  changedRatio,
+  meanDifference,
+} from "../lib/motion";
+
+// Quadros seguidos com movimento local para considerar que um dado está rolando
+// (descarta um único quadro "sujo", como um salto de exposição)
+const MIN_ROLLING_FRAMES = 2;
+// Depois de uma revisão, ignora o movimento por um tempo (a mão saindo da cena)
+const COOLDOWN_MS = 1500;
 
 interface UseMotionDetectorProps {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -20,10 +35,23 @@ export function useMotionDetector({
   onFrameCaptured,
   enabled = true,
 }: UseMotionDetectorProps) {
-  const [detectionState, setDetectionState] = useState<DetectionState>("IDLE");
+  const [detectionState, setDetectionStateValue] = useState<DetectionState>("IDLE");
   const [motionLevel, setMotionLevel] = useState<number>(0);
-  
-  const prevImageDataRef = useRef<Uint8ClampedArray | null>(null);
+  // Espelho síncrono do estado: a máquina de estados decide em cima dele, e não dentro de
+  // uma função de atualização do React (que pode rodar duas vezes e duplicaria o envio).
+  const stateRef = useRef<DetectionState>("IDLE");
+  const setDetectionState = useCallback((next: DetectionState) => {
+    stateRef.current = next;
+    setDetectionStateValue(next);
+  }, []);
+
+  const prevBlocksRef = useRef<Float32Array | null>(null);
+  // Cena "de referência" parada, sem dado novo. Uma captura só acontece se a cena, depois
+  // de assentar, for diferente dela; assim balançar a câmera, ou pegar o dado de volta, não
+  // dispara envio.
+  const baselineRef = useRef<Float32Array | null>(null);
+  const rollingFramesRef = useRef(0);
+  const armedAtRef = useRef(0);
   const lowResCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const highResCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const stabilizeStartTimeRef = useRef<number | null>(null);
@@ -57,15 +85,18 @@ export function useMotionDetector({
     if (frame && onFrameCaptured) {
       onFrameCaptured(frame);
     }
-  }, [captureHighResFrame, onFrameCaptured]);
+  }, [captureHighResFrame, onFrameCaptured, setDetectionState]);
 
-  // Reset do detector para nova rolagem
+  // Reset do detector para nova rolagem. A cena de referência é mantida de propósito:
+  // é ela que permite saber que o dado foi recolhido em vez de tratar isso como nova rolagem.
   const resetDetector = useCallback(() => {
-    prevImageDataRef.current = null;
+    prevBlocksRef.current = null;
     stabilizeStartTimeRef.current = null;
+    rollingFramesRef.current = 0;
+    armedAtRef.current = Date.now() + COOLDOWN_MS;
     setDetectionState("IDLE");
     setMotionLevel(0);
-  }, []);
+  }, [setDetectionState]);
 
   useEffect(() => {
     if (!isStreaming || !enabled || detectionState === "CAPTURING" || detectionState === "REVIEWING" || detectionState === "SENDING") {
@@ -77,8 +108,8 @@ export function useMotionDetector({
 
     if (!lowResCanvasRef.current) {
       lowResCanvasRef.current = document.createElement("canvas");
-      lowResCanvasRef.current.width = 160;
-      lowResCanvasRef.current.height = 120;
+      lowResCanvasRef.current.width = FRAME_WIDTH;
+      lowResCanvasRef.current.height = FRAME_HEIGHT;
     }
 
     const lowResCanvas = lowResCanvasRef.current;
@@ -92,56 +123,75 @@ export function useMotionDetector({
         const video = videoRef.current;
 
         if (video && video.readyState >= 2) {
-          lowResCtx.drawImage(video, 0, 0, 160, 120);
-          const currentData = lowResCtx.getImageData(0, 0, 160, 120).data;
+          lowResCtx.drawImage(video, 0, 0, FRAME_WIDTH, FRAME_HEIGHT);
+          const blocks = blockMeans(lowResCtx.getImageData(0, 0, FRAME_WIDTH, FRAME_HEIGHT).data);
+          const prev = prevBlocksRef.current;
 
-          if (prevImageDataRef.current) {
-            let totalDiff = 0;
-            const prev = prevImageDataRef.current;
-            const numPixels = 160 * 120;
+          if (prev) {
+            const now = Date.now();
+            const ratio = changedRatio(prev, blocks, sensitivity);
+            setMotionLevel(Math.min(100, Math.round(meanDifference(prev, blocks) * 4)));
 
-            // Compara intensidade de cinza em cada pixel
-            for (let i = 0; i < currentData.length; i += 4) {
-              const currentGray = (currentData[i] + currentData[i + 1] + currentData[i + 2]) / 3;
-              const prevGray = (prev[i] + prev[i + 1] + prev[i + 2]) / 3;
-              totalDiff += Math.abs(currentGray - prevGray);
-            }
-
-            const avgDiff = totalDiff / numPixels;
-            setMotionLevel(Math.min(100, Math.round(avgDiff * 4)));
-
-            // Lógica da máquina de estados
-            if (avgDiff > sensitivity) {
-              // Movimento significativo detectado (dado rolando)
-              setDetectionState("ROLLING");
+            if (ratio >= GLOBAL_CHANGED_RATIO) {
+              // A imagem inteira mudou: câmera balançou ou a luz variou. Não é uma rolagem,
+              // então descarta o que estava em andamento e refaz a referência depois.
+              baselineRef.current = null;
               stabilizeStartTimeRef.current = null;
-            } else if (avgDiff <= sensitivity) {
-              setDetectionState((prevState) => {
-                if (prevState === "ROLLING" || prevState === "STABILIZING") {
-                  const now = Date.now();
-                  if (!stabilizeStartTimeRef.current) {
-                    stabilizeStartTimeRef.current = now;
-                    return "STABILIZING";
-                  }
+              rollingFramesRef.current = 0;
+              if (stateRef.current !== "IDLE") setDetectionState("IDLE");
+            } else if (ratio >= MIN_CHANGED_RATIO) {
+              // Mudança só em parte da cena: algo (um dado) se movendo
+              stabilizeStartTimeRef.current = null;
+              rollingFramesRef.current += 1;
+              if (rollingFramesRef.current >= MIN_ROLLING_FRAMES && now >= armedAtRef.current) {
+                setDetectionState("ROLLING");
+              }
+            } else {
+              // Cena parada
+              rollingFramesRef.current = 0;
+              const state = stateRef.current;
 
-                  // Dado em repouso pelo tempo necessário
-                  if (now - stabilizeStartTimeRef.current >= stabilizeMs) {
-                    // Aciona captura automática
+              if (state === "ROLLING" || state === "STABILIZING") {
+                if (!stabilizeStartTimeRef.current) {
+                  stabilizeStartTimeRef.current = now;
+                  setDetectionState("STABILIZING");
+                } else if (now - stabilizeStartTimeRef.current >= stabilizeMs) {
+                  stabilizeStartTimeRef.current = null;
+                  const baseline = baselineRef.current;
+                  const sinceBaseline = baseline
+                    ? changedRatio(baseline, blocks, sensitivity)
+                    : null;
+
+                  if (sinceBaseline === null || sinceBaseline >= GLOBAL_CHANGED_RATIO) {
+                    // Sem referência, ou a câmera se mexeu: só refaz a referência
+                    baselineRef.current = blocks;
+                    setDetectionState("IDLE");
+                  } else if (sinceBaseline >= MIN_CHANGED_RATIO) {
+                    // A cena assentou diferente da referência: há algo novo para ler.
+                    // Marca CAPTURING antes de enviar, para nenhum quadro seguinte repetir.
+                    setDetectionState("CAPTURING");
                     const frame = captureHighResFrame();
                     if (frame && onFrameCaptured) {
                       onFrameCaptured(frame);
                     }
-                    return "CAPTURING";
+                  } else {
+                    // Voltou a ser igual à referência (dado recolhido, mão que saiu): nada a ler
+                    setDetectionState("IDLE");
                   }
-                  return "STABILIZING";
                 }
-                return prevState;
-              });
+              } else if (
+                !baselineRef.current ||
+                changedRatio(baselineRef.current, blocks, sensitivity) < MIN_CHANGED_RATIO
+              ) {
+                // Em repouso: forma a referência e acompanha variações lentas de luz,
+                // mas nunca absorve um dado que apareceu na cena
+                baselineRef.current = blocks;
+              }
             }
           }
 
-          // Armazena cópia do frame anterior
-          prevImageDataRef.current = new Uint8ClampedArray(currentData);
+          // Armazena os blocos do quadro anterior
+          prevBlocksRef.current = blocks;
         }
       }
 
@@ -155,7 +205,7 @@ export function useMotionDetector({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [isStreaming, enabled, detectionState, sensitivity, stabilizeMs, videoRef, captureHighResFrame, onFrameCaptured]);
+  }, [isStreaming, enabled, detectionState, sensitivity, stabilizeMs, videoRef, captureHighResFrame, onFrameCaptured, setDetectionState]);
 
   return {
     detectionState,
