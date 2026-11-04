@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.routes.providers import router as providers_router
 from app.routes.recognition import router as recognition_router
 from app.routes.rolls import router as rolls_router
 
@@ -20,6 +21,7 @@ app.add_middleware(
 )
 
 app.include_router(recognition_router)
+app.include_router(providers_router)
 app.include_router(rolls_router)
 
 

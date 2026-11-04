@@ -34,6 +34,6 @@ schema: spec-driven
 context: |
   Monorepo com duas aplicações:
   - api/: backend em Python
-  - web/: frontend em Next.js (web, Android e iOS)
+  - web/: frontend em Next.js (web responsivo, usado no navegador do celular)
   Escreva propostas e specs em português.
   Mantenha cabeçalhos e SHALL/MUST em inglês.

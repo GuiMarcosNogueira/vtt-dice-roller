@@ -25,9 +25,41 @@ export interface RollEvent {
   source?: string;
 }
 
+export interface RecognitionError {
+  code: string;
+  message: string;
+}
+
+export interface VisionProvider {
+  id: string;
+  name: string;
+  default_model: string;
+  requires_user_key: boolean;
+}
+
+export interface VisionModel {
+  id: string;
+  name: string;
+}
+
+export const SERVER_PROVIDER_ID = "server";
+
+// Usado quando o backend não responde /api/providers: o padrão do servidor sempre existe
+export const SERVER_PROVIDER: VisionProvider = {
+  id: SERVER_PROVIDER_ID,
+  name: "Padrão do servidor",
+  default_model: "",
+  requires_user_key: false,
+};
+
 export interface AppSettings {
   apiUrl: string;
+  apiToken: string;
+  visionProvider: string;
+  visionApiKey: string;
+  visionModel: string;
   playerName: string;
+  autoCapture: boolean; // envia à IA sozinho quando o dado para; desligado, só pelo botão
   autoSend: boolean;
   autoSendDelayMs: number;
   motionSensitivity: number; // lower means more sensitive
@@ -36,7 +68,12 @@ export interface AppSettings {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   apiUrl: "http://localhost:8000",
+  apiToken: "",
+  visionProvider: SERVER_PROVIDER_ID,
+  visionApiKey: "",
+  visionModel: "",
   playerName: "Jogador",
+  autoCapture: true,
   autoSend: false,
   autoSendDelayMs: 2500,
   motionSensitivity: 15,

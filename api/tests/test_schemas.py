@@ -76,3 +76,19 @@ def test_roll_event():
     assert event.player_name == "Geralt"
     assert event.source == "optical_camera"
     assert event.timestamp is not None
+
+
+def test_recognize_request_provider_and_model_defaults_and_limits():
+    req = RecognizeRequest(image_base64="1234567890abcdefghij")
+    assert req.provider is None
+    assert req.model is None
+
+    req2 = RecognizeRequest(
+        image_base64="1234567890abcdefghij", provider="deepseek", model="deepseek-flash"
+    )
+    assert (req2.provider, req2.model) == ("deepseek", "deepseek-flash")
+
+    with pytest.raises(ValidationError):
+        RecognizeRequest(image_base64="1234567890abcdefghij", provider="x" * 51)
+    with pytest.raises(ValidationError):
+        RecognizeRequest(image_base64="1234567890abcdefghij", model="m" * 201)

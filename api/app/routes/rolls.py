@@ -1,5 +1,8 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
+from typing import Annotated
 
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, status
+
+from app.auth import is_token_valid, require_token
 from app.schemas.dice import RollEvent
 from app.services.websocket_manager import ws_manager
 
@@ -10,7 +13,14 @@ rolls_history: list[RollEvent] = []
 
 
 @router.websocket("/ws/rolls")
-async def websocket_rolls_endpoint(websocket: WebSocket):
+async def websocket_rolls_endpoint(
+    websocket: WebSocket, token: Annotated[str | None, Query()] = None
+):
+    if not is_token_valid(token):
+        # Aceita antes de fechar para que o cliente receba o código 1008 de forma confiável
+        await websocket.accept()
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
     await ws_manager.connect(websocket)
     try:
         # Envia mensagem inicial de confirmação de conexão
@@ -32,7 +42,12 @@ async def websocket_rolls_endpoint(websocket: WebSocket):
         ws_manager.disconnect(websocket)
 
 
-@router.post("/api/rolls", response_model=RollEvent, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/api/rolls",
+    response_model=RollEvent,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_token)],
+)
 async def create_and_broadcast_roll(roll: RollEvent):
     rolls_history.append(roll)
     # Broadcast em tempo real para todos os clientes conectados (Foundry VTT, UI, etc.)
@@ -40,7 +55,7 @@ async def create_and_broadcast_roll(roll: RollEvent):
     return roll
 
 
-@router.get("/api/rolls", response_model=list[RollEvent])
+@router.get("/api/rolls", response_model=list[RollEvent], dependencies=[Depends(require_token)])
 def get_rolls_history():
     # Retorna as últimas 50 rolagens
     return list(reversed(rolls_history[-50:]))
