@@ -28,6 +28,12 @@ DICE_MAX_VALUES = {
 class RecognizeRequest(BaseModel):
     image_base64: str = Field(..., description="Imagem em base64 com ou sem prefixo data:image/...")
     die_type_hint: DieType | None = Field(None, description="Dica opcional do tipo de dado")
+    provider: str | None = Field(
+        None, max_length=50, description="Provedor do catálogo (padrão: o do servidor)"
+    )
+    model: str | None = Field(
+        None, max_length=200, description="Modelo do provedor (padrão: o do catálogo)"
+    )
 
     @field_validator("image_base64")
     @classmethod

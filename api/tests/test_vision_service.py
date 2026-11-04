@@ -11,7 +11,7 @@ async def test_vision_service_initialization_and_mock_call():
     service = VisionService(
         api_key="test_key",
         base_url="https://openrouter.ai/api/v1",
-        model="google/gemini-2.0-flash-001",
+        model="google/gemini-2.5-flash",
     )
 
     mock_chat_completion = MagicMock()
@@ -38,7 +38,7 @@ async def test_vision_service_initialization_and_mock_call():
         # Verify call payload
         mock_create.assert_called_once()
         kwargs = mock_create.call_args.kwargs
-        assert kwargs["model"] == "google/gemini-2.0-flash-001"
+        assert kwargs["model"] == "google/gemini-2.5-flash"
         assert kwargs["messages"][0]["content"] == SYSTEM_PROMPT
         assert "d20" in kwargs["messages"][1]["content"][0]["text"]
         assert kwargs["messages"][1]["content"][1]["image_url"]["url"].startswith(
