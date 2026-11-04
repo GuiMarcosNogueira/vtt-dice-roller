@@ -5,11 +5,17 @@ import { useState, useEffect, useRef, useCallback } from "react";
 export function useCamera() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // Cada início/parada invalida os anteriores: o React executa o efeito duas vezes em
+  // desenvolvimento e a troca de câmera reinicia o vídeo, e o resultado de uma tentativa
+  // superada (inclusive o AbortError do play()) não pode virar erro nem deixar stream aberto.
+  const attemptRef = useRef(0);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
 
   const startCamera = useCallback(async (facing: "environment" | "user" = facingMode) => {
+    const attempt = ++attemptRef.current;
+    const isStale = () => attempt !== attemptRef.current;
     setError(null);
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
@@ -29,14 +35,22 @@ export function useCamera() {
         audio: false,
       });
 
+      if (isStale()) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.setAttribute("playsinline", "true");
         await videoRef.current.play();
-        setIsStreaming(true);
+        if (!isStale()) {
+          setIsStreaming(true);
+        }
       }
     } catch (err: unknown) {
+      if (isStale()) return;
       console.error("Erro ao acessar câmera:", err);
       setIsStreaming(false);
       if (err instanceof Error) {
@@ -54,6 +68,7 @@ export function useCamera() {
   }, [facingMode]);
 
   const stopCamera = useCallback(() => {
+    attemptRef.current++;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
