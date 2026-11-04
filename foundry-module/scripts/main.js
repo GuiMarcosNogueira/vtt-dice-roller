@@ -24,6 +24,16 @@ class VTTDiceRollerClient {
       onChange: () => this.connect(),
     });
 
+    game.settings.register(MODULE_ID, "serverToken", {
+      name: "Token de Acesso (opcional)",
+      hint: "Mesmo valor de API_TOKEN configurado no servidor. Deixe em branco se o servidor não exigir token.",
+      scope: "client",
+      config: true,
+      type: String,
+      default: "",
+      onChange: () => this.connect(),
+    });
+
     game.settings.register(MODULE_ID, "showNotifications", {
       name: "Exibir Notificações de Conexão",
       hint: "Exibe pop-up na tela ao conectar ou perder conexão com o servidor de rolagens.",
@@ -37,10 +47,18 @@ class VTTDiceRollerClient {
     this.connect();
   }
 
+  buildSocketUrl(url, token) {
+    if (!token) return url;
+    return `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
+  }
+
   connect() {
     const url = game.settings.get(MODULE_ID, "serverUrl");
+    const token = game.settings.get(MODULE_ID, "serverToken");
     if (this.socket) {
       try {
+        // Evita que o onclose do socket antigo agende uma reconexão duplicada
+        this.socket.onclose = null;
         this.socket.close();
       } catch (e) {
         console.warn(`${MODULE_ID} | Erro ao fechar socket anterior:`, e);
@@ -55,7 +73,7 @@ class VTTDiceRollerClient {
     console.log(`${MODULE_ID} | Conectando ao servidor: ${url}`);
 
     try {
-      this.socket = new WebSocket(url);
+      this.socket = new WebSocket(this.buildSocketUrl(url, token));
 
       this.socket.onopen = () => {
         this.isConnected = true;
@@ -74,8 +92,16 @@ class VTTDiceRollerClient {
         }
       };
 
-      this.socket.onclose = () => {
+      this.socket.onclose = (event) => {
         this.isConnected = false;
+        if (event.code === 1008) {
+          // O servidor recusou o token: reconectar sozinho só repetiria o erro
+          console.warn(`${MODULE_ID} | Token de acesso recusado pelo servidor. Corrija-o nas configurações do módulo.`);
+          if (game.settings.get(MODULE_ID, "showNotifications")) {
+            ui.notifications.warn("VTT Dice Roller: token de acesso recusado pelo servidor.");
+          }
+          return;
+        }
         console.warn(`${MODULE_ID} | Conexão perdida com o servidor. Tentando reconectar em 5 segundos...`);
         this.reconnectTimeout = setTimeout(() => this.connect(), 5000);
       };
@@ -112,6 +138,33 @@ class VTTDiceRollerClient {
     await this.postRollToChat(dieType, rollValue, matchingUser);
   }
 
+  /**
+   * Monta uma rolagem já avaliada com o valor lido pela câmera, a partir de dados
+   * serializados (o mesmo formato que o Foundry usa para restaurar rolagens do chat).
+   * Evita avaliar uma rolagem aleatória e sobrescrever campos internos.
+   */
+  buildEvaluatedRoll(dieType, rollValue) {
+    const faces = parseInt(dieType.slice(1), 10);
+    return Roll.fromData({
+      class: "Roll",
+      formula: `1d${faces}`,
+      options: {},
+      evaluated: true,
+      total: rollValue,
+      terms: [
+        {
+          class: "Die",
+          number: 1,
+          faces,
+          modifiers: [],
+          options: {},
+          evaluated: true,
+          results: [{ result: rollValue, active: true }],
+        },
+      ],
+    });
+  }
+
   async postRollToChat(dieType, rollValue, user) {
     const isCritical = (dieType === "d20" && rollValue === 20);
     const isFumble = (dieType === "d20" && rollValue === 1);
@@ -144,12 +197,7 @@ class VTTDiceRollerClient {
     // Se o módulo "Dice So Nice!" estiver instalado e ativo, aciona animação 3D
     if (game.dice3d) {
       try {
-        const rollObj = new Roll(`1${dieType}`);
-        await rollObj.evaluate({ async: true });
-        // Força o resultado para o valor exato lido pela câmera
-        rollObj.terms[0].results = [{ result: rollValue, active: true }];
-        rollObj._total = rollValue;
-        game.dice3d.showForRoll(rollObj, user, true);
+        game.dice3d.showForRoll(this.buildEvaluatedRoll(dieType, rollValue), user, true);
       } catch (e) {
         console.warn(`${MODULE_ID} | Não foi possível disparar animação 3D:`, e);
       }
