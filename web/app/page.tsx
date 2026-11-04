@@ -10,16 +10,29 @@ import {
   DieType,
   DetectionState,
   RecognitionResult,
+  RecognitionError,
   RollEvent,
   AppSettings,
   DEFAULT_SETTINGS,
+  SERVER_PROVIDER_ID,
 } from "./types";
+import { authHeaders, readApiError } from "./lib/api";
+
+function buildHeaders(settings: AppSettings): Record<string, string> {
+  return { "Content-Type": "application/json", ...authHeaders(settings.apiToken) };
+}
+
+function usesUserProvider(settings: AppSettings): boolean {
+  return settings.visionProvider !== SERVER_PROVIDER_ID;
+}
 
 export default function Home() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [showSettings, setShowSettings] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [recognitionResult, setRecognitionResult] = useState<RecognitionResult | null>(null);
+  const [recognitionError, setRecognitionError] = useState<RecognitionError | null>(null);
+  const [tokenWarning, setTokenWarning] = useState(false);
   const [isRecognizing, setIsRecognizing] = useState(false);
   const [showReview, setShowReview] = useState(false);
   const [recentRolls, setRecentRolls] = useState<RollEvent[]>([]);
@@ -39,6 +52,7 @@ export default function Home() {
 
   const saveSettings = (newSettings: AppSettings) => {
     setSettings(newSettings);
+    setTokenWarning(false);
     localStorage.setItem("vtt_dice_settings", JSON.stringify(newSettings));
   };
 
@@ -72,34 +86,45 @@ export default function Home() {
       setShowReview(true);
       setIsRecognizing(true);
       setRecognitionResult(null);
+      setRecognitionError(null);
+      setTokenWarning(false);
 
       try {
+        // Para o padrão do servidor a requisição é idêntica à de antes; só o provedor
+        // escolhido pelo usuário leva provedor, modelo e a chave dele.
+        const userProvider = usesUserProvider(settings);
         const response = await fetch(`${settings.apiUrl}/api/recognize`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image_base64: base64Image }),
+          headers: {
+            ...buildHeaders(settings),
+            ...(userProvider ? { "X-Vision-Api-Key": settings.visionApiKey } : {}),
+          },
+          body: JSON.stringify({
+            image_base64: base64Image,
+            ...(userProvider
+              ? {
+                  provider: settings.visionProvider,
+                  ...(settings.visionModel ? { model: settings.visionModel } : {}),
+                }
+              : {}),
+          }),
         });
 
         if (!response.ok) {
-          throw new Error(`Erro na API (${response.status})`);
+          setRecognitionError(await readApiError(response));
+          return;
         }
 
         const data: RecognitionResult = await response.json();
         setRecognitionResult(data);
       } catch (err) {
         console.error("Falha no reconhecimento:", err);
-        // Fallback padrão para permitir correção manual mesmo se a API falhar
-        setRecognitionResult({
-          die_type: "d20",
-          value: 1,
-          confidence: 0.1,
-          raw_explanation: "Não foi possível conectar à IA. Selecione o valor manualmente.",
-        });
+        setRecognitionError({ code: "network_error", message: String(err) });
       } finally {
         setIsRecognizing(false);
       }
     },
-    [settings.apiUrl]
+    [settings]
   );
 
   // Hook do detector de movimento
@@ -114,7 +139,7 @@ export default function Home() {
     sensitivity: settings.motionSensitivity,
     stabilizeMs: settings.stabilizeMs,
     onFrameCaptured: handleFrameCaptured,
-    enabled: !showReview,
+    enabled: !showReview && settings.autoCapture,
   });
 
   // Confirmação e envio da rolagem para o backend / VTT
@@ -134,20 +159,32 @@ export default function Home() {
     setRecentRolls((prev) => [rollPayload, ...prev.slice(0, 19)]);
 
     try {
-      await fetch(`${settings.apiUrl}/api/rolls`, {
+      const response = await fetch(`${settings.apiUrl}/api/rolls`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: buildHeaders(settings),
         body: JSON.stringify(rollPayload),
       });
+      if (response.status === 401) {
+        // A rolagem não chegou ao VTT: não a mostra como enviada
+        setTokenWarning(true);
+        setRecentRolls((prev) => prev.filter((r) => r.id !== rollPayload.id));
+      }
     } catch (e) {
       console.error("Erro ao enviar rolagem para o backend:", e);
     }
+  };
+
+  // Liga/desliga o envio automático à IA; a captura manual continua funcionando
+  const toggleAutoCapture = () => {
+    saveSettings({ ...settings, autoCapture: !settings.autoCapture });
+    resetDetector(); // descarta o quadro de referência e qualquer estado em andamento
   };
 
   const handleCancelRoll = () => {
     setShowReview(false);
     setCapturedImage(null);
     setRecognitionResult(null);
+    setRecognitionError(null);
     resetDetector();
   };
 
@@ -166,7 +203,10 @@ export default function Home() {
     }
   };
 
-  const badge = getStatusBadge(showReview ? "REVIEWING" : detectionState);
+  const badge =
+    !showReview && !settings.autoCapture
+      ? { text: "Captura manual", color: "bg-neutral-800 text-neutral-300 border-neutral-700" }
+      : getStatusBadge(showReview ? "REVIEWING" : detectionState);
 
   return (
     <main className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col items-center justify-between p-3 sm:p-6 select-none">
@@ -210,6 +250,15 @@ export default function Home() {
           </button>
         </div>
       </header>
+
+      {tokenWarning && (
+        <div
+          role="alert"
+          className="w-full max-w-md mt-2 text-xs text-rose-300 bg-rose-950/40 p-2.5 rounded-lg border border-rose-900/60"
+        >
+          ⚠️ Token de acesso inválido ou ausente: a rolagem não foi enviada ao VTT. Corrija em ⚙️ Configurações.
+        </div>
+      )}
 
       {/* Área Central: Visualizador da Câmera */}
       <div className="w-full max-w-md flex-1 flex flex-col items-center justify-center my-3 relative">
@@ -290,8 +339,25 @@ export default function Home() {
           <span>Capturar Dado Agora</span>
         </button>
 
+        <button
+          type="button"
+          role="switch"
+          aria-checked={settings.autoCapture}
+          onClick={toggleAutoCapture}
+          className="w-full py-2.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-xs text-neutral-300 flex items-center justify-between px-4"
+        >
+          <span>Envio automático à IA</span>
+          <span
+            className={`font-bold ${settings.autoCapture ? "text-emerald-400" : "text-neutral-500"}`}
+          >
+            {settings.autoCapture ? "Ligado" : "Desligado"}
+          </span>
+        </button>
+
         <p className="text-[11px] text-center text-neutral-500">
-          A detecção automática dispara ~800ms após o dado parar na bandeja.
+          {settings.autoCapture
+            ? "A detecção automática dispara ~800ms após o dado parar na bandeja."
+            : "Envio automático desligado: a imagem só é enviada à IA ao tocar em Capturar Dado Agora."}
         </p>
       </footer>
 
@@ -300,6 +366,7 @@ export default function Home() {
         <ReviewModal
           imageSrc={capturedImage}
           result={recognitionResult}
+          error={recognitionError}
           isLoading={isRecognizing}
           onConfirm={handleConfirmRoll}
           onCancel={handleCancelRoll}

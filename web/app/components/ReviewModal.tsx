@@ -1,11 +1,33 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { DieType, RecognitionResult, DIE_MAX_VALUES } from "../types";
+import { DieType, RecognitionResult, RecognitionError, DIE_MAX_VALUES } from "../types";
+
+const ERROR_MESSAGES: Record<string, string> = {
+  no_die_detected:
+    "Nenhum dado foi identificado na imagem. Capture novamente com o dado bem visível ou informe o valor manualmente.",
+  unauthorized:
+    "Token de acesso inválido ou ausente. Informe o token correto em ⚙️ Configurações.",
+  upstream_timeout:
+    "O serviço de IA demorou demais para responder. Tente novamente ou selecione o valor manualmente.",
+  upstream_error:
+    "O serviço de IA falhou ao ler o dado. Tente novamente ou selecione o valor manualmente.",
+  invalid_reading:
+    "A IA retornou uma leitura inválida. Selecione o valor manualmente.",
+  network_error:
+    "Não foi possível conectar ao servidor. Verifique o endereço da API e selecione o valor manualmente.",
+  provider_auth_error:
+    "A chave de API foi recusada pelo provedor. Corrija a chave em ⚙️ Configurações ou selecione o valor manualmente.",
+  missing_api_key:
+    "Falta a API key do provedor escolhido. Informe-a em ⚙️ Configurações ou selecione o valor manualmente.",
+  unknown_provider:
+    "O servidor não reconhece o provedor escolhido. Revise o provedor em ⚙️ Configurações ou selecione o valor manualmente.",
+};
 
 interface ReviewModalProps {
   imageSrc: string | null;
   result: RecognitionResult | null;
+  error?: RecognitionError | null;
   isLoading: boolean;
   onConfirm: (dieType: DieType, value: number) => void;
   onCancel: () => void;
@@ -16,6 +38,7 @@ interface ReviewModalProps {
 export function ReviewModal({
   imageSrc,
   result,
+  error = null,
   isLoading,
   onConfirm,
   onCancel,
@@ -36,7 +59,8 @@ export function ReviewModal({
 
   // Contagem regressiva para auto-send caso habilitado
   useEffect(() => {
-    if (!autoSend || isLoading || !result) return;
+    // Nunca envia sozinho uma leitura que falhou: o jogador precisa confirmar o valor
+    if (!autoSend || isLoading || !result || error) return;
 
     const intervalMs = 50;
     const step = (intervalMs / autoSendDelayMs) * 100;
@@ -52,7 +76,7 @@ export function ReviewModal({
     }, intervalMs);
 
     return () => clearInterval(timer);
-  }, [autoSend, autoSendDelayMs, isLoading, result, selectedDie, selectedValue, onConfirm]);
+  }, [autoSend, autoSendDelayMs, isLoading, result, error, selectedDie, selectedValue, onConfirm]);
 
   const maxVal = DIE_MAX_VALUES[selectedDie] || 20;
   const numbers = selectedDie === "d100" 
@@ -98,8 +122,17 @@ export function ReviewModal({
         </div>
 
         {/* Informações Reconhecidas */}
-        {!isLoading && result && (
+        {!isLoading && (result || error) && (
           <div className="flex flex-col gap-3">
+            {error && (
+              <p
+                role="alert"
+                className="text-xs text-rose-300 bg-rose-950/40 p-2.5 rounded-lg border border-rose-900/60"
+              >
+                ⚠️ {ERROR_MESSAGES[error.code] ?? error.message}
+              </p>
+            )}
+
             <div className="flex items-center justify-between bg-neutral-800/80 p-3 rounded-xl border border-neutral-700">
               <div className="flex flex-col">
                 <span className="text-xs text-neutral-400 uppercase font-semibold">
@@ -119,7 +152,7 @@ export function ReviewModal({
               </div>
             </div>
 
-            {result.raw_explanation && (
+            {result?.raw_explanation && (
               <p className="text-xs text-neutral-400 italic bg-neutral-950/60 p-2.5 rounded-lg border border-neutral-800/50">
                 💡 {result.raw_explanation}
               </p>
@@ -153,7 +186,7 @@ export function ReviewModal({
         )}
 
         {/* Barra de Progresso Auto-Send */}
-        {autoSend && !isLoading && (
+        {autoSend && !isLoading && !error && (
           <div className="w-full bg-neutral-800 h-1.5 rounded-full overflow-hidden">
             <div
               className="bg-emerald-500 h-full transition-all duration-75 ease-linear"

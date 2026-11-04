@@ -3,7 +3,12 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { ReviewModal } from "../app/components/ReviewModal";
 import { SettingsModal } from "../app/components/SettingsModal";
 import { RecentRolls } from "../app/components/RecentRolls";
-import { DEFAULT_SETTINGS, RecognitionResult, RollEvent } from "../app/types";
+import {
+  DEFAULT_SETTINGS,
+  RecognitionError,
+  RecognitionResult,
+  RollEvent,
+} from "../app/types";
 
 describe("ReviewModal Component", () => {
   beforeEach(() => {
@@ -171,9 +176,109 @@ describe("ReviewModal Component", () => {
 
     expect(onConfirmMock).toHaveBeenCalledWith("d20", 18);
   });
+
+  describe("recognition errors", () => {
+    const renderWithError = (
+      error: RecognitionError,
+      props: Partial<React.ComponentProps<typeof ReviewModal>> = {}
+    ) => {
+      const onConfirm = vi.fn();
+      render(
+        <ReviewModal
+          imageSrc="data:image/jpeg;base64,mock"
+          result={null}
+          error={error}
+          isLoading={false}
+          onConfirm={onConfirm}
+          onCancel={vi.fn()}
+          {...props}
+        />
+      );
+      return onConfirm;
+    };
+
+    it.each([
+      ["no_die_detected", /Nenhum dado foi identificado/],
+      ["unauthorized", /Token de acesso inválido ou ausente/],
+      ["upstream_timeout", /demorou demais/],
+      ["upstream_error", /serviço de IA falhou/],
+      ["invalid_reading", /leitura inválida/],
+      ["network_error", /Não foi possível conectar ao servidor/],
+    ])("shows a specific message for %s", (code, expected) => {
+      renderWithError({ code, message: "mensagem do servidor" });
+
+      expect(screen.getByRole("alert")).toHaveTextContent(expected);
+    });
+
+    it("falls back to the server message for unknown codes", () => {
+      renderWithError({ code: "algo_novo", message: "mensagem do servidor" });
+
+      expect(screen.getByRole("alert")).toHaveTextContent("mensagem do servidor");
+    });
+
+    it("keeps manual selection available and confirms the chosen value", () => {
+      const onConfirm = renderWithError({ code: "no_die_detected", message: "x" });
+
+      fireEvent.click(screen.getByRole("button", { name: "7" }));
+      fireEvent.click(screen.getByText(/Confirmar & Enviar VTT/));
+
+      expect(onConfirm).toHaveBeenCalledWith("d20", 7);
+    });
+
+    it("never auto-sends when there is an error, even with a result and autoSend on", () => {
+      const onConfirm = renderWithError(
+        { code: "upstream_error", message: "x" },
+        {
+          result: { die_type: "d20", value: 1, confidence: 0.1 },
+          autoSend: true,
+          autoSendDelayMs: 1000,
+        }
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      expect(onConfirm).not.toHaveBeenCalled();
+      expect(document.querySelector(".bg-emerald-500.h-full")).toBeNull();
+    });
+
+    it("does not show an error alert when recognition succeeded", () => {
+      render(
+        <ReviewModal
+          imageSrc="data:image/jpeg;base64,mock"
+          result={{ die_type: "d6", value: 4, confidence: 0.9 }}
+          isLoading={false}
+          onConfirm={vi.fn()}
+          onCancel={vi.fn()}
+        />
+      );
+
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
 });
 
 describe("SettingsModal Component", () => {
+  it("edits the access token in a password field and saves it", () => {
+    const onSaveMock = vi.fn();
+
+    render(
+      <SettingsModal settings={DEFAULT_SETTINGS} onSave={onSaveMock} onClose={vi.fn()} />
+    );
+
+    const tokenInput = screen.getByPlaceholderText("Em branco se o servidor não exigir");
+    expect(tokenInput).toHaveAttribute("type", "password");
+    expect(tokenInput).toHaveValue("");
+
+    fireEvent.change(tokenInput, { target: { value: "segredo-da-mesa" } });
+    fireEvent.click(screen.getByText("Salvar"));
+
+    expect(onSaveMock).toHaveBeenCalledWith(
+      expect.objectContaining({ apiToken: "segredo-da-mesa" })
+    );
+  });
+
   it("renders form inputs with initial settings and saves on submit", () => {
     const onSaveMock = vi.fn();
     const onCloseMock = vi.fn();
